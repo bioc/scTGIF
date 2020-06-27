@@ -2,17 +2,18 @@
 # settingTGIF
 #
 setGeneric("settingTGIF", function(sce, gmt, reducedDimNames,
-    assayNames="counts", grid.size=50){
+    assayNames="counts", nbins=40){
     standardGeneric("settingTGIF")})
 
 setMethod("settingTGIF",
     signature(sce="SingleCellExperiment"),
-    function(sce, gmt, reducedDimNames, assayNames="counts", grid.size=50){
-        .settingTGIF(gmt, reducedDimNames, assayNames,
-            grid.size, sce)})
+    function(sce, gmt, reducedDimNames, assayNames="counts", nbins=40){
+        userobjects <- deparse(substitute(sce))
+        .settingTGIF(userobjects, gmt, reducedDimNames, assayNames,
+            nbins, sce)})
 
-.settingTGIF <- function(gmt, reducedDimNames, assayNames,
-    grid.size, ...){
+.settingTGIF <- function(userobjects, gmt, reducedDimNames, assayNames,
+    nbins, ...){
     sce <- list(...)[[1]]
     # class-check
     classCheck <- class(gmt)
@@ -51,36 +52,49 @@ setMethod("settingTGIF",
             paste0("reducedDims(sce)[['", reducedDimNames, "']]"),
             " must be same and specified as NCBI (Entrez) Gene IDs"))
     }
-    # Gene * Grid matrix
-    X <- .twoDimGrid(input[common.geneid, ], twoD, grid.size)
+    # Setting of schex
+    sce <- make_hexbin(sce, nbins=nbins,
+        dimension_reduction=reducedDimNames)
+    # Gene * Bin matrix
+    X <- .twoDimBin(sce, common.geneid, assayNames)
     # Gene * Function matrix
     Y <- .convertGMT(gmt, common.geneid)
     X[is.nan(X)] <- 0
     Y[is.nan(Y)] <- 0
     # Overwrite
-    metadata(sce) <- list(gmt=gmt, X=X, Y=Y,
-        common.geneid=common.geneid, grid.size=grid.size,
-        reducedDimNames=reducedDimNames)
-    sce
+    metadata(sce)[["gmt"]] <- gmt
+    metadata(sce)[["X"]] <- X
+    metadata(sce)[["Y"]] <- Y
+    metadata(sce)[["common.geneid"]] <- common.geneid
+    metadata(sce)[["nbins"]] <- nbins
+    metadata(sce)[["reducedDimNames"]] <- reducedDimNames
+    metadata(sce)[["assayNames"]] <- assayNames
+    assign(userobjects, sce, envir=.GlobalEnv)
 }
 
 #
 # calcTGIF
 #
-setGeneric("calcTGIF", function(sce, rank){
+setGeneric("calcTGIF", function(sce, ndim, verbose=FALSE, droplet=TRUE){
     standardGeneric("calcTGIF")})
 
 setMethod("calcTGIF",
     signature(sce="SingleCellExperiment"),
-    function(sce, rank){
-        .calcTGIF(rank, sce)})
+    function(sce, ndim, verbose=FALSE, droplet=TRUE){
+        userobjects <- deparse(substitute(sce))
+        .calcTGIF(userobjects, ndim, verbose, droplet, sce)})
 
-.calcTGIF <- function(rank, ...){
+.calcTGIF <- function(userobjects, ndim, verbose, droplet, ...){
     sce <- list(...)[[1]]
+    # Import expression matrix
+    assayNames <- metadata(sce)$assayNames
+    input <- .importAssays(sce, assayNames)
+    # ここで鬼QC!!!!!
+    # QC <- .QCmetrics(sce, input, droplet)
     X <- metadata(sce)$X
     Y <- metadata(sce)$Y
-    if(min(ncol(X), ncol(Y)) < rank){
-        stop(paste0("Please specify rank parameter smaller than ",
+    if(min(ncol(X), ncol(Y)) < ndim){
+        stop(paste0("Please specify ndim parameter smaller than ",
             min(ncol(X), ncol(Y))))
     }
     cat(paste0("Gene x Grid matrix (X) has ", nrow(X), " rows and ",
@@ -88,27 +102,24 @@ setMethod("calcTGIF",
     cat(paste0("Gene x Function matrix (Y) has ", nrow(Y), " rows and ",
         ncol(Y), " columns\n"))
     # Joint NMF
-    res.sctgif <- jNMF(list(X=X, Y=Y), J=rank, algorithm="Frobenius")
+    res.sctgif <- jNMF(list(X=X, Y=Y), J=ndim, algorithm="Frobenius",
+        verbose=verbose)
     # Reconstruction error
     recerror <- res.sctgif$RecError
     relchange <- res.sctgif$RelChange
     # Overwrite
-    gmt <- metadata(sce)$gmt
-    common.geneid <- metadata(sce)$common.geneid
-    grid.size <- metadata(sce)$grid.size
-    reducedDimNames <- metadata(sce)$reducedDimNames
-    metadata(sce) <- list(gmt=gmt, X=X, Y=Y, common.geneid=common.geneid,
-        grid.size=grid.size, reducedDimNames=reducedDimNames,
-        sctgif=res.sctgif, rank=rank, recerror=recerror,
-        relchange=relchange)
-    sce
+    # metadata(sce)[["QC"]] <- QC
+    metadata(sce)[["sctgif"]] <- res.sctgif
+    metadata(sce)[["ndim"]] <- ndim
+    metadata(sce)[["recerror"]] <- recerror
+    metadata(sce)[["relchange"]] <- relchange
+    assign(userobjects, sce, envir=.GlobalEnv)
 }
-
 
 #
 # reportTGIF
 #
-setGeneric("reportTGIF", function(sce, out.dir=tempdir(), html.open=TRUE,
+setGeneric("reportTGIF", function(sce, out.dir=tempdir(), html.open=FALSE,
     title="The result of scTGIF",
     author="The person who runs this script",
     assayNames="counts"){
@@ -116,7 +127,7 @@ setGeneric("reportTGIF", function(sce, out.dir=tempdir(), html.open=TRUE,
 
 setMethod("reportTGIF",
     signature(sce="SingleCellExperiment"),
-    function(sce, out.dir=tempdir(), html.open=TRUE,
+    function(sce, out.dir=tempdir(), html.open=FALSE,
     title="The result of scTGIF",
     author="The person who runs this script",
     assayNames="counts"){
@@ -155,10 +166,10 @@ setMethod("reportTGIF",
     X <- metadata(sce)$X
     Y <- metadata(sce)$Y
     common.geneid <- metadata(sce)$common.geneid
-    grid.size <- metadata(sce)$grid.size
+    nbins <- metadata(sce)$nbins
     reducedDimNames <- metadata(sce)$reducedDimNames
     sctgif <- metadata(sce)$sctgif
-    rank <- metadata(sce)$rank
+    ndim <- metadata(sce)$ndim
     recerror <- metadata(sce)$recerror
     relchange <- metadata(sce)$relchange
 
@@ -167,11 +178,10 @@ setMethod("reportTGIF",
 
     # Plot
     for(i in seq_len(ncol(H1))){
-        par(ask=FALSE)
-        png(filename=paste0(out.dir, "/figures/Grid_", i, ".png"),
-            width=750, height=750)
-        .plot.twoD_grid.SVD(H1, twoD, grid.size, i)
-        dev.off()
+        filename <- paste0(out.dir, "/figures/Hex_", i, ".png")
+        g <- .plot_hexbin_pattern(sce, H1[, i])
+        ggsave(filename, plot=g, dpi=200, width=6, height=6.5)
+        system(paste0("ls ", filename))
     }
 
     # Save the result of scTGIF
@@ -184,7 +194,7 @@ setMethod("reportTGIF",
     writeLines(.HEADER(author, title), outIdx, sep="\n")
     writeLines(.BODY1, outIdx, sep="\n")
     writeLines(.BODY2, outIdx, sep="\n")
-    writeLines(.BODY3(rank, out.dir), outIdx, sep="\n")
+    writeLines(.BODY3(ndim, out.dir), outIdx, sep="\n")
     writeLines(.BODY4, outIdx, sep="\n")
     writeLines(.BODY5, outIdx, sep="\n")
     close(outIdx)
