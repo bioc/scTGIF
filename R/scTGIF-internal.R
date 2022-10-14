@@ -27,7 +27,7 @@
     }
 }
 
-.plot_hexbin_pattern <- function(sce, pattern){
+.plot_hexbin_pattern <- function(sce, pattern, i){
     drhex <- data.frame(sce@metadata$hexbin$hexbin.matrix,
         pattern=pattern)
     drhex <- as_tibble(drhex)
@@ -35,7 +35,7 @@
     ggplot(drhex, aes_string("x", "y", fill = pattern)) +
     geom_hex(stat = "identity") +
     theme_classic() + theme(legend.position = "bottom") +
-    ggtitle("Pattern1") + scale_fill_viridis_c() +
+    ggtitle(paste0("Pattern", i)) + scale_fill_viridis_c() +
     labs(x = "Dim1", y = "Dim2") + theme(legend.title = element_blank())
 }
 
@@ -161,7 +161,7 @@
                     paste0("## Pattern ", x, "\n"),
                     ##### H1 #####
                     "![](",
-                    paste0(out.dir, "/figures/Hex_", x, ".png"),
+                    paste0("figures/Hex_", x, ".png"),
                     ")\n",
                     ##### H2 #####
                     "```{r, message=F, warning=F}\n", # Top
@@ -172,7 +172,8 @@
                     "value <- value[order(value, decreasing=TRUE)]\n",
                     "target <- seq_len(min(20, length(value)))\n",
                     "value <- value[target]\n",
-                    "term <- term[target]\n\n",
+                    "term <- term[target]\n",
+                    "term <- sapply(term, function(x){substr(x, 1, 40)})\n\n",
                     "p <- plot_ly(x=term, y=~value,\n",
                     "type=\"bar\", color=~value, text=term,\n",
                     "colors=c(\"#4b61ba\", \"gray\", ",
